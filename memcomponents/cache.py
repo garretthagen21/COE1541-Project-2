@@ -1,18 +1,19 @@
 import csv
 import os
+from memcomponents.utilities import *
 
 # Page node that will be used in page replacement algorithm
-class PageNode(object):
-    def __init__(self, address, refBit = False ,dirtyBit = False, prev=None, next=None):
+class Block(object):
+    def __init__(self, address, validBit = False ,dirtyBit = False, prev=None, next=None):
         self.address = address
-        self.refBit = refBit
+        self.validBit = validBit
         self.dirtyBit = dirtyBit
         self.prev = prev
         self.next = next
 
 
 # Base class for paging table
-class PagingAlgorithm(object):
+class LRUCache(object):
 
     def __init__(self, numFrames,name = "DEFAULT"):
         self.algoName = name
@@ -145,22 +146,45 @@ class PagingAlgorithm(object):
 
 
 
-    # Pythonic pure virtual functions
+    # Public method
     def access(self, address, mode):
-        raise NotImplementedError("Error: access() not implemented")
+
+        # Attempt to find the page in memory
+        pageNode = dictLookup(self.lookupTable, address)
+
+        # Page does not exist so we need to load it
+        if pageNode is None:
+
+            # Increment page faults
+            self.numPageFaults += 1
+
+            # Create new page entry
+            pageNode = Block(address)
+
+            # Our page table is full so we need to evict
+            if self.isFull():
+
+                # Write to disk if dirty bit is 1
+                if self.head.dirtyBit:
+                    self.numDiskWrites += 1
+
+                # Evict front node if it exists
+                self.remove(self.head)
+
+        # The node already exists so remove it, so we can move it to the back
+        else:
+            self.remove(pageNode)
+
+        # Regardless we will insert the pageNode to the back
+        self.append(pageNode)
+
+        # Only difference between store and load is what we do to the dirty bit
+        if mode == "s":
+            pageNode.dirtyBit = True
+
+        # Increment accesses
+        self.numAccesses += 1
 
 
 
-# Get the address and offset of the address string in decimal
-def parseAddressString(rawAddress):
-    hexData = rawAddress.split('x')[1]
-    addrPortion = hexData[0:-3]
-    offsetPortion = rawAddress[-3:]
-    return addrPortion,offsetPortion
 
- # Convenience dict lookup
-def dictLookup(dict,key):
-    try:
-        return dict[key]
-    except KeyError:
-        return None
