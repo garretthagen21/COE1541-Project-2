@@ -1,190 +1,187 @@
 import csv
 import os
+import collections
 from memcomponents.utilities import *
 
-# Page node that will be used in page replacement algorithm
+
 class Block(object):
-    def __init__(self, address, validBit = False ,dirtyBit = False, prev=None, next=None):
-        self.address = address
-        self.validBit = validBit
-        self.dirtyBit = dirtyBit
-        self.prev = prev
-        self.next = next
+    def __init__(self, tag='', valid_bit=False, dirty_bit=False, data="**DATA**"):
+        self.tag = tag
+        self.valid_bit = valid_bit
+        self.dirty_bit = dirty_bit
+        self.data = data
+
+    def as_table_entry(self):
+        return [self.valid_bit, self.dirty_bit, self.tag, self.data]
+
+
+def is_hit(block):
+    return block is not None and block.valid_bit  # and block.offset == offset
+
+
+class LRUCache(object):
+    def __init__(self, name, block_size_bytes,
+                 total_size_bytes, blocks_per_set, latency, wb_wa=True,
+                 upper=None,
+                 lower=None):
+        self.name = name
+        self.latency = latency
+        self.block_size_bytes = block_size_bytes
+        self.blocks_per_set = blocks_per_set
+        self.total_size_bytes = total_size_bytes
+        self.total_blocks = int(self.total_size_bytes / self.block_size_bytes)
+        self.total_sets = int(self.total_blocks / self.blocks_per_set)
+        self.wb_wa = wb_wa
+        self.lower = lower
+        self.upper = upper
+        self.num_accesses = 0
+        self.num_hits = 0
+
+        self.sets = [LRUSet(self.blocks_per_set) for i in range(self.total_sets)]
+
+    def set_lower(self, cache):
+        self.lower = cache
+
+    def set_upper(self, cache):
+        self.upper = cache
+
+    def access(self, mem_access):
+        # Increment total accesses
+        self.num_accesses += 1
+
+        # Add our latency
+        mem_access.add_time(self.latency)
+
+        # Parse the address to get our set index
+        tag, index, offset = mem_access.parse_address(self.total_sets, self.block_size_bytes)
+
+        # Get the set we are interested in
+        found_set = self.sets[index]
+
+        # Attempt to access the block we need, note on hit
+        block = found_set.__getitem__(tag)
+
+        # A null block is the equivalent of valid_bit = 0
+        if not is_hit(block):
+
+            # Load from lower level on read miss or write miss and
+            # write allocate
+            if mem_access.mode == 'r' or self.wb_wa:
+                # Load from lower level
+                block = self.simulate_load(tag, mem_access)
+
+                # Get evicted block if nay
+                evicted_block = found_set.__setitem__(tag, block)
+
+                # Activate dirty bit if using write back
+                print(evicted_block)
+                if self.wb_wa and evicted_block and evicted_block.dirty_bit:
+                    print("Simulate write to memomry?")
+        # We hit our block
+        else:
+            self.num_hits += 1
+
+            # It is a write operation and write through policy
+            if mem_access.mode == 'w' and not self.wb_wa:
+                block.dirty_bit = True
+
+                # So if we are not the bottom layer, continue to propagate down
+                if self.lower is not None:
+                    self.lower.access(mem_access)
+                else:
+                    print("Reached main memory write!")
+
+        # Update our sets
+        self.sets[index] = found_set
+
+    def simulate_load(self, tag, mem_access):
+        # We are the last level so simulate access, by adding 100 to our time
+        if self.lower is None:
+            if mem_access.mode == 'r':
+                mem_access.add_time(self.latency + 100)
+        else:
+            # Look in the memory source below us
+            self.lower.access(mem_access)
+
+        # Create new block to bring into memory
+        return Block(tag, True, mem_access.mode == 'w')
+
+    def hit_rate(self):
+        return float(self.num_hits) / float(self.num_accesses)
+
+    def miss_rate(self):
+        return 1.0 - self.hit_rate()
+
+    # Print out our cache table
+    def __repr__(self):
+        summary_header = "-- Cache Name: " + str(self.name) + \
+                         " -- Latency: " +str(self.latency) + \
+                         " -- Cache Size (KB): " + str(self.total_size_bytes / 1000) + \
+                         " -- Block Size (B): " + str(self.block_size_bytes) + \
+                         " -- Ways: " + str(self.blocks_per_set) + \
+                         " -- Hit Rate: " + str(int(self.hit_rate()*100))+"%" + \
+                         " -- Miss Rate: " + str(int(self.miss_rate()*100))+"% --\n"
+        # Create header
+        table_header = ["Index"]
+        for i in range(self.blocks_per_set):
+            table_header.extend(["V"+str(i),"D"+str(i),"Tag"+str(i),"Data"+str(i)])
+
+        # Create table rows
+        table_rows = []
+        set_index = 0
+        for cache_set in self.sets:
+            cache_row = [set_index]
+            cache_row += cache_set.as_table_entry()
+            table_rows.append(cache_row)
+            set_index+=1
+
+        # Create pretty table
+        table = PrettyTable(table_header)
+        for row in table_rows:
+            table.add_row(row)
+
+        # Return our string object
+        return summary_header+str(table)
+
+
+
+
 
 
 # Base class for paging table
-class LRUCache(object):
+class LRUSet(collections.OrderedDict):
 
-    def __init__(self, numFrames,name = "DEFAULT"):
-        self.algoName = name
-        self.numFrames = numFrames
-        self.numDiskWrites = 0
-        self.numPageFaults = 0
-        self.numAccesses = 0
-        self.head = None
-        self.tail = None
-        self.lookupTable = {}
+    def __init__(self, maxsize=4, *args, **kwds):
+        self.maxsize = maxsize
+        super().__init__(*args, **kwds)
 
-    # Remove page node from lookup table
-    def remove(self, pageNode):
+    def __getitem__(self, tag):
+        value = super().get(tag, None)
+        if value is not None:
+            self.move_to_end(tag)
+        return value
 
-        # Connect prev pointer to next pointer
-        if pageNode.prev:
-            pageNode.prev.next = pageNode.next
+    def __setitem__(self, tag, block):
+        super().__setitem__(tag, block)
+        evicted = None
+        if len(self) > self.maxsize:
+            oldest = next(iter(self))
+            evicted = self[oldest]
+            del self[oldest]
 
-        # Connect next pointer to prev pointer
-        if pageNode.next:
-            pageNode.next.prev = pageNode.prev
-
-        # If this was the head move it
-        if pageNode is self.head:
-            self.head = pageNode.next
-
-        # If this was the tail move it
-        if pageNode is self.tail:
-            self.tail = pageNode.prev
-
-        # Remove entry from hashmap
-        del self.lookupTable[pageNode.address]
-
-        # private method to append page node
-
-    # Append page node to end of list
-    def append(self, pageNode):
-
-        # Append to end
-        currTail = self.tail
-        pageNode.prev = currTail
-        if currTail:
-            currTail.next = pageNode
-
-        # New tail is page node
-        self.tail = pageNode
-        self.tail.next = None
-
-        # If this is also the first node we need to set the head
-        if not self.head:
-            self.head = self.tail
-
-        # Add entry to hashmap lookuptable
-        self.lookupTable[pageNode.address] = pageNode
+        return evicted
 
     # Check to see if lookup table is full
-    def isFull(self):
-        return len(self.lookupTable) >= self.numFrames
+    def is_full(self):
+        return len(self) > self.maxsize
 
-    # Mainly for debugging
-    def displayPageTable(self):
-        currNode = self.head
-        print("["+self.algoName+"]  Access Num: " + str(self.numAccesses))
-        print("\tLinked List: ")
-        for i in range(self.numFrames):
-            if currNode:
-                currNode = currNode.next
-                print("\t| " + str(i) + " | " + str(currNode.address) + " | " + str(currNode.dirtyBit) + " |")
-            else:
-                print("\t| " + str(i) + " | XXXXXXX | X |")
+    def as_table_entry(self):
+        block_list = []
+        # Fill in actual values
+        for block in self.values():
+            block_list += block.as_table_entry()
+        # Fill remaining space with empty blocks
+        for i in range(self.maxsize - len(self)):
+            block_list+=Block().as_table_entry()
 
-        print("\tLookup Table:")
-        i = 0
-        for key, value in self.lookupTable.items():
-            print("\t| " + str(i) + " -> " + str(key) + " | " + str(value.dirtyBit) + " |")
-            i += 1
-
-        print("\n")
-
-
-
-    def printSummary(self):
-        print("Algorithm: "+str(self.algoName))
-        print("Number of frames: "+str(self.numFrames))
-        print("Total memory accesses: "+str(self.numAccesses))
-        print("Total page faults: "+str(self.numPageFaults))
-        print("Total writes to disk: "+str(self.numDiskWrites))
-
-    def writeCSV(self,csvFile):
-
-        # Figure out our index
-        if self.algoName == "LRU":
-            ourIndex = 1
-        elif self.algoName == "SECOND":
-            ourIndex = 2
-        else:
-            ourIndex = 3
-
-        csvRows = []
-        # Try and load existing csv information
-        if os.path.exists(csvFile):
-            rFile = open(csvFile,'r')
-            reader = csv.reader(rFile)
-            for row in reader:
-                csvRows.append(row)
-            rFile.close()
-        else:
-            csvRows = [["Frames","LRU","SECOND","OPT"]]
-
-
-
-        foundRow = False
-        for row in csvRows:
-            # Transfer other measurements if we already have an entry
-            if row[0] == str(self.numFrames):
-                row[ourIndex] = str(self.numPageFaults)
-                foundRow = True
-
-        # if we need to make a new row
-        if not foundRow:
-            newRow = [str(self.numFrames), "0", "0", "0"]
-            newRow[ourIndex] = str(self.numPageFaults)
-            csvRows.append(newRow)
-
-        wFile = open(csvFile, 'w')
-        csvWriter = csv.writer(wFile)
-        csvWriter.writerows(csvRows)
-        wFile.close()
-
-
-
-
-    # Public method
-    def access(self, address, mode):
-
-        # Attempt to find the page in memory
-        pageNode = dictLookup(self.lookupTable, address)
-
-        # Page does not exist so we need to load it
-        if pageNode is None:
-
-            # Increment page faults
-            self.numPageFaults += 1
-
-            # Create new page entry
-            pageNode = Block(address)
-
-            # Our page table is full so we need to evict
-            if self.isFull():
-
-                # Write to disk if dirty bit is 1
-                if self.head.dirtyBit:
-                    self.numDiskWrites += 1
-
-                # Evict front node if it exists
-                self.remove(self.head)
-
-        # The node already exists so remove it, so we can move it to the back
-        else:
-            self.remove(pageNode)
-
-        # Regardless we will insert the pageNode to the back
-        self.append(pageNode)
-
-        # Only difference between store and load is what we do to the dirty bit
-        if mode == "s":
-            pageNode.dirtyBit = True
-
-        # Increment accesses
-        self.numAccesses += 1
-
-
-
-
+        return block_list
