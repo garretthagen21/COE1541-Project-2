@@ -5,7 +5,7 @@ from memcomponents.utilities import *
 
 
 class Block(object):
-    def __init__(self, tag='', valid_bit=False, dirty_bit=False, data="**DATA**"):
+    def __init__(self, tag='', valid_bit=False, dirty_bit=False,data="**DATA**"):
         self.tag = tag
         self.valid_bit = valid_bit
         self.dirty_bit = dirty_bit
@@ -13,6 +13,18 @@ class Block(object):
 
     def as_table_entry(self):
         return [self.valid_bit, self.dirty_bit, self.tag, self.data]
+
+    def __eq__(self,obj):
+        return isinstance(obj,Block) and \
+        obj.data == self.data and \
+        obj.valid_bit == self.valid_bit
+
+    def __repr__(self):
+        return "Block --" \
+               " Tag: " + str(self.tag) + \
+               " Valid: " + str(self.valid_bit) + \
+               " Dirty: " + str(self.dirty_bit) + \
+               " Data: " + str(self.data)
 
 
 def is_hit(block):
@@ -45,7 +57,20 @@ class LRUCache(object):
     def set_upper(self, cache):
         self.upper = cache
 
+    def get_valid_blocks(self):
+        valid_blocks=[]
+        for cache_set in self.sets:
+            blocks = cache_set.values()
+            for block in blocks:
+                if block.valid_bit:
+                    valid_blocks.append(block)
+        return valid_blocks
+
+
+
+
     def access(self, mem_access):
+
         # Increment total accesses
         self.num_accesses += 1
 
@@ -58,43 +83,51 @@ class LRUCache(object):
         # Get the set we are interested in
         found_set = self.sets[index]
 
-        # Attempt to access the block we need, note on hit
+        # Attempt to access the block we need, note on hit it will be moved to the front
         block = found_set.__getitem__(tag)
 
         # A null block is the equivalent of valid_bit = 0
         if not is_hit(block):
 
             # Load from lower level on read miss or write miss and
-            # write allocate
+            # write allocate. If we miss on wt_nwa write, we do nothing
             if mem_access.mode == 'r' or self.wb_wa:
-                # Load from lower level
-                block = self.simulate_load(tag, mem_access)
+                # Simulate load for cache miss
+                block = self.simulate_load_from(tag, mem_access)
 
-                # Get evicted block if nay
+                # Get evicted block if any
                 evicted_block = found_set.__setitem__(tag, block)
 
-                # Activate dirty bit if using write back
-                print(evicted_block)
+                # Write straight to memory if using write back
                 if self.wb_wa and evicted_block and evicted_block.dirty_bit:
-                    print("Simulate write to memomry?")
+                    print(self.name + ": Writing " + str(evicted_block.tag) + " to memory!")
+
         # We hit our block
         else:
             self.num_hits += 1
 
             # It is a write operation and write through policy
-            if mem_access.mode == 'w' and not self.wb_wa:
+            if mem_access.mode == 'w':
                 block.dirty_bit = True
 
-                # So if we are not the bottom layer, continue to propagate down
+                # If we are not the bottom layer, continue to propagate down
                 if self.lower is not None:
                     self.lower.access(mem_access)
-                else:
-                    print("Reached main memory write!")
+                # Else if write-through and we have reached the bottom, write to memory
+                elif not self.wb_wa:
+                    print("Main Memory: Writing " + str(block.tag) + "!")
 
         # Update our sets
         self.sets[index] = found_set
 
-    def simulate_load(self, tag, mem_access):
+    def simulate_store_to(self,tag,mem_access):
+        # So if we are not the bottom layer, continue to propagate down
+        if self.lower is not None:
+            self.lower.access(mem_access)
+        else:
+            print("Main Memory: Writing " + str(mem_access.address) + "!")
+
+    def simulate_load_from(self, tag, mem_access):
         # We are the last level so simulate access, by adding 100 to our time
         if self.lower is None:
             if mem_access.mode == 'r':
@@ -103,8 +136,8 @@ class LRUCache(object):
             # Look in the memory source below us
             self.lower.access(mem_access)
 
-        # Create new block to bring into memory
-        return Block(tag, True, mem_access.mode == 'w')
+        # Create new block to bring into memory, simulating from the
+        return Block(tag, True, mem_access.mode == 'w', mem_access.address)
 
     def hit_rate(self):
         return float(self.num_hits) / float(self.num_accesses)
@@ -115,16 +148,16 @@ class LRUCache(object):
     # Print out our cache table
     def __repr__(self):
         summary_header = "-- Cache Name: " + str(self.name) + \
-                         " -- Latency: " +str(self.latency) + \
+                         " -- Latency: " + str(self.latency) + \
                          " -- Cache Size (KB): " + str(self.total_size_bytes / 1000) + \
                          " -- Block Size (B): " + str(self.block_size_bytes) + \
                          " -- Ways: " + str(self.blocks_per_set) + \
-                         " -- Hit Rate: " + str(int(self.hit_rate()*100))+"%" + \
-                         " -- Miss Rate: " + str(int(self.miss_rate()*100))+"% --\n"
+                         " -- Hit Rate: " + str(int(self.hit_rate() * 100)) + "%" + \
+                         " -- Miss Rate: " + str(int(self.miss_rate() * 100)) + "% --\n"
         # Create header
         table_header = ["Index"]
         for i in range(self.blocks_per_set):
-            table_header.extend(["V"+str(i),"D"+str(i),"Tag"+str(i),"Data"+str(i)])
+            table_header.extend(["V" + str(i), "D" + str(i), "Tag" + str(i), "Data" + str(i)])
 
         # Create table rows
         table_rows = []
@@ -133,7 +166,7 @@ class LRUCache(object):
             cache_row = [set_index]
             cache_row += cache_set.as_table_entry()
             table_rows.append(cache_row)
-            set_index+=1
+            set_index += 1
 
         # Create pretty table
         table = PrettyTable(table_header)
@@ -141,11 +174,7 @@ class LRUCache(object):
             table.add_row(row)
 
         # Return our string object
-        return summary_header+str(table)
-
-
-
-
+        return summary_header + str(table)
 
 
 # Base class for paging table
@@ -164,7 +193,7 @@ class LRUSet(collections.OrderedDict):
     def __setitem__(self, tag, block):
         super().__setitem__(tag, block)
         evicted = None
-        if len(self) > self.maxsize:
+        if self.is_full():
             oldest = next(iter(self))
             evicted = self[oldest]
             del self[oldest]
@@ -175,6 +204,7 @@ class LRUSet(collections.OrderedDict):
     def is_full(self):
         return len(self) > self.maxsize
 
+
     def as_table_entry(self):
         block_list = []
         # Fill in actual values
@@ -182,6 +212,6 @@ class LRUSet(collections.OrderedDict):
             block_list += block.as_table_entry()
         # Fill remaining space with empty blocks
         for i in range(self.maxsize - len(self)):
-            block_list+=Block().as_table_entry()
+            block_list += Block().as_table_entry()
 
         return block_list
