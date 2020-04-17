@@ -4,7 +4,7 @@ import sys
 
 
 def show_error_and_exit(error_string, code=1):
-    print("[Error] " + error_string + " Exiting program...\n")
+    print("\n[Error] " + error_string + " Exiting program...\n")
     sys.exit(code)
 
 

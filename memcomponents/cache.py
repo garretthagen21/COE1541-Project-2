@@ -5,7 +5,7 @@ from memcomponents.utilities import *
 
 
 class Block(object):
-    def __init__(self, tag='', valid_bit=False, dirty_bit=False,data=""):
+    def __init__(self, tag='', valid_bit=False, dirty_bit=False, data=""):
         self.tag = tag
         self.valid_bit = valid_bit
         self.dirty_bit = dirty_bit
@@ -14,10 +14,10 @@ class Block(object):
     def as_table_entry(self):
         return [self.valid_bit, self.dirty_bit, self.tag, self.data]
 
-    def __eq__(self,obj):
-        return isinstance(obj,Block) and \
-        obj.data == self.data and \
-        obj.valid_bit == self.valid_bit
+    def __eq__(self, obj):
+        return isinstance(obj, Block) and \
+               obj.data == self.data and \
+               obj.valid_bit == self.valid_bit
 
     def __repr__(self):
         return "Block --" \
@@ -35,7 +35,8 @@ class LRUCache(object):
     def __init__(self, name, block_size_bytes,
                  total_size_bytes, blocks_per_set, latency, wb_wa=True,
                  upper=None,
-                 lower=None):
+                 lower=None,
+                 debug=2):
         self.name = name
         self.latency = latency
         self.block_size_bytes = block_size_bytes
@@ -48,8 +49,8 @@ class LRUCache(object):
         self.upper = upper
         self.num_accesses = 0
         self.num_hits = 0
-
-        self.sets = [LRUSet(self.blocks_per_set) for i in range(self.total_sets)]
+        self.debug = debug
+        self.sets = [LRUSet(set_index,self.blocks_per_set) for set_index in range(self.total_sets)]
 
     def set_lower(self, cache):
         self.lower = cache
@@ -57,15 +58,13 @@ class LRUCache(object):
     def set_upper(self, cache):
         self.upper = cache
 
-    def get_valid_blocks(self):
-        valid_blocks=[]
+    def get_valid_sets(self, dirty_required=False):
+        valid_sets = []
         for cache_set in self.sets:
-            blocks = cache_set.values()
-            for block in blocks:
-                if block.valid_bit:
-                    valid_blocks.append(block)
-        return valid_blocks
-
+            valid_blocks = cache_set.get_valid_blocks(dirty_required)
+            if valid_blocks:
+                valid_sets.append(cache_set)
+        return valid_sets
 
     def invalidate(self):
         self.num_accesses = 0
@@ -103,16 +102,11 @@ class LRUCache(object):
 
                 # Write straight to memory if using write back #TODO: do we need to account for latency here?
                 if self.wb_wa and evicted_block and evicted_block.dirty_bit:
-                    # Add latency of writing straight to memory
-                    level = self
-                    while level.lower:
-                        level = level.lower
-                    mem_access.add_time( level.latency+ 100)
-                    #print(self.name + ": Writing " + str(evicted_block.data) + " to memory!")
-            # else write miss for write through - we still need to check other levels
+                    mem_access.add_time(self.get_memory_latency())
+
+            # Write miss for write through - we still need to check other levels
             else:
                 self.simulate_store_to(mem_access)
-
 
         # We hit our block
         else:
@@ -126,18 +120,16 @@ class LRUCache(object):
                 if not self.wb_wa:
                     self.simulate_store_to(mem_access)
 
-
         # Update our sets
         self.sets[index] = found_set
 
-    def simulate_store_to(self,mem_access):
+    def simulate_store_to(self, mem_access):
         # If we are not the bottom layer, continue to propagate down
         if self.lower:
             self.lower.access(mem_access)
-        # if write-through and we have reached the bottom, write to memory
+        # If write-through and we have reached the bottom, write to memory
         else:
-            mem_access.add_time(self.latency + 100) #TODO: do we need to account for latency here?
-            #print("Main Memory: Writing " + str(mem_access.address) + "!")
+            mem_access.add_time(self.latency + 100)
 
     def simulate_load_from(self, tag, mem_access):
         # We are the last level so simulate access, by adding 100 to our time
@@ -145,13 +137,20 @@ class LRUCache(object):
             # Look in the memory source below us
             self.lower.access(mem_access)
         else:
-            #if mem_access.mode == 'r':
+            # if mem_access.mode == 'r': #TODO: This adds latency for wa
             mem_access.add_time(self.latency + 100)
 
         # Create new block to bring into memory, simulating from the
         return Block(tag, True, mem_access.mode == 'w', mem_access.address)
 
+    def get_memory_latency(self):
+        # Find the last level of cache
+        level = self
+        while level.lower:
+            level = level.lower
 
+        # Return the last level + 100
+        return level.latency + 100
 
     def hit_rate(self):
         try:
@@ -167,29 +166,38 @@ class LRUCache(object):
                " -- Latency: " + str(self.latency) + \
                " -- Cache Size (KB): " + str(self.total_size_bytes / 1000) + \
                " -- Block Size (B): " + str(self.block_size_bytes) + \
-               " -- Ways: " + str(self.blocks_per_set) + "\n"\
+               " -- Ways: " + str(self.blocks_per_set) + "\n" \
                " -- Accesses: " + str(self.num_accesses) + \
                " -- Hits: " + str(self.num_hits) + \
-               " -- Misses: " + str(self.num_accesses-self.num_hits) + \
+               " -- Misses: " + str(self.num_accesses - self.num_hits) + \
                " -- Hit Rate: " + str(int(self.hit_rate() * 100)) + "%" + \
                " -- Miss Rate: " + str(int(self.miss_rate() * 100)) + "%\n"
 
     # Print out our cache table
     def __repr__(self):
-        summary_header = self.stat_string()
+
+        # Determine what we want to show based on our debug arams
+        if self.debug == 3:
+            table_sets = self.sets
+        elif self.debug == 2:
+            table_sets = self.get_valid_sets(False)
+        elif self.debug == 1:
+            table_sets = self.get_valid_sets(True)
+        else:
+            return self.stat_string()
+
+
         # Create header
         table_header = ["Index"]
         for i in range(self.blocks_per_set):
             table_header.extend(["V" + str(i), "D" + str(i), "Tag" + str(i), "Data" + str(i)])
 
+
+
         # Create table rows
         table_rows = []
-        set_index = 0
-        for cache_set in self.sets:
-            cache_row = [set_index]
-            cache_row += cache_set.as_table_entry()
-            table_rows.append(cache_row)
-            set_index += 1
+        for cache_set in table_sets:
+            table_rows.append(cache_set.as_table_entry())
 
         # Create pretty table
         table = PrettyTable(table_header)
@@ -197,13 +205,14 @@ class LRUCache(object):
             table.add_row(row)
 
         # Return our string object
-        return summary_header + str(table)
+        return self.stat_string() + str(table)
 
 
 # Base class for paging table
 class LRUSet(collections.OrderedDict):
 
-    def __init__(self, maxsize=4, *args, **kwds):
+    def __init__(self,index=0, maxsize=4, *args, **kwds):
+        self.index = index
         self.maxsize = maxsize
         super().__init__(*args, **kwds)
 
@@ -227,12 +236,25 @@ class LRUSet(collections.OrderedDict):
     def is_full(self):
         return len(self) > self.maxsize
 
+    def get_valid_blocks(self, dirty_required=False):
+        valid_blocks = []
+
+        for block in self.values():
+            condition = block.valid_bit
+            if dirty_required:
+                condition = condition and block.dirty_bit
+            if condition:
+                valid_blocks.append(block)
+
+        return valid_blocks
 
     def as_table_entry(self):
-        block_list = []
+        block_list = [self.index]
+
         # Fill in actual values
         for block in self.values():
             block_list += block.as_table_entry()
+
         # Fill remaining space with empty blocks
         for i in range(self.maxsize - len(self)):
             block_list += Block().as_table_entry()

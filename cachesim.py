@@ -4,8 +4,6 @@ import ast
 import time
 import argparse
 import os
-import sys
-from memcomponents import cache
 from memcomponents.utilities import *
 from memcomponents.access_sequence import AccessSequence
 from memcomponents.heirarchy import *
@@ -18,16 +16,16 @@ class CacheSimulator(object):
 
     def run(self, debug=1):
         # Record execution time
-        startTime = time.time()
+        start_time = time.time()
 
         # Execute the memory trace
         for mem_access in self.sequence:
             self.heirarchy.access(mem_access)
+
             if debug > 1:
                 print("\n\n<<<<<<<<<<< Instruction Access >>>>>>>>>>>>>>")
                 print("\n" + str(mem_access))
                 print("\n" + str(cache_heirarchy))
-
 
         if debug > 0:
             print("\n\n************** Final Results ******************")
@@ -35,7 +33,7 @@ class CacheSimulator(object):
             print("\n" + str(self.sequence) + "\n")
 
             # Write our execution time
-            hours, rem = divmod(time.time() - startTime, 3600)
+            hours, rem = divmod(time.time() - start_time, 3600)
             minutes, seconds = divmod(rem, 60)
             print("Program Finished In Time {:0>2}:{:0>2}:{:05.2f}\n".format(int(hours), int(minutes), seconds))
 
@@ -52,8 +50,13 @@ def verify_args(args):
         show_error_and_exit("Length of --set-associativity must equal the number of layers: " + str(num_layers))
     if args.write_policy != "wb+wa" and args.write_policy != "wt+nwa":
         show_error_and_exit("Write policy must be wb+wa or wt+nwa")
-    if args.version != "sequential" and args.version != "access-under-misses":
-        show_error_and_exit("Version must be sequential or access-under-misses")
+    if args.max_misses < 0:
+        show_error_and_exit("--max-misses must be a number greater than or equal to 0!")
+    if args.debug_level not in [0,1,2]:
+        show_error_and_exit("--debug argument must be 0, 1, or 2!")
+    if args.cache_view not in [0,1,2,3]:
+        show_error_and_exit("--cache-view argument must be 0, 1, 2, or 3!")
+
 
 
 def args_as_list(s):
@@ -88,15 +91,16 @@ if __name__ == "__main__":
                         help='Write/Allocate policy for all levels of cache. Options <wb+wa,wt+nwa>')
     parser.add_argument('-m', '--max-misses', dest='max_misses', action='store',
                         default=0, type=int,
-                        help='Maximum number of misses in cache for memory accesses to be acknowleged. A value of 0 is sequential access')
+                        help='Maximum number of misses in cache for memory accesses '
+                        'to be acknowleged. A value of 0 is sequential access')
     parser.add_argument('-d', '--debug-level', dest='debug_level', action='store',
                         default=1, type=int,
                         help='Verbosity of debug level. 0 = No Output, '
                              '1 = Final Output Tables, 2 = Heirarchy Status at Every Instruction')
-    parser.add_argument('-v', '--version', dest='version', action='store',
-                        default='sequential', type=str,
-                        help='Write/Allocate policy for all levels of cache. Options <sequential,access-under-misses>')
-
+    parser.add_argument('-v', '--cache-view', dest='cache_view', action='store',
+                        default=2, type=int,
+                        help='How to display the contents of each cache. 0 = Stats Only, '
+                             '1 = Dirty Sets Only, 2 = Valid Sets Only,3 = All Sets')
     # Parse the arguments
     args = parser.parse_args()
 
@@ -109,8 +113,11 @@ if __name__ == "__main__":
     # Create cache heirarchy
     cache_heirarchy = create_heirarchy(block_size=args.block_size,
                                        num_layers=args.cache_layers, sizes=args.cache_sizes, cycles=args.cache_cycles,
-                                       associativity=args.set_associativity, write_policy=args.write_policy,max_misses=args.max_misses)
+                                       associativity=args.set_associativity, write_policy=args.write_policy,
+                                       max_misses=args.max_misses,cache_view=args.cache_view)
 
     # Create simulator
     cache_sim = CacheSimulator(memory_trace, cache_heirarchy)
+
+    # Run simulator
     cache_sim.run(args.debug_level)
