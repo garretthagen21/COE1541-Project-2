@@ -5,7 +5,7 @@ from memcomponents.utilities import *
 
 
 class Block(object):
-    def __init__(self, tag='', valid_bit=False, dirty_bit=False,data="**DATA**"):
+    def __init__(self, tag='', valid_bit=False, dirty_bit=False,data=""):
         self.tag = tag
         self.valid_bit = valid_bit
         self.dirty_bit = dirty_bit
@@ -110,12 +110,14 @@ class LRUCache(object):
             if mem_access.mode == 'w':
                 block.dirty_bit = True
 
-                # If we are not the bottom layer, continue to propagate down
-                if self.lower is not None:
-                    self.lower.access(mem_access)
-                # Else if write-through and we have reached the bottom, write to memory
-                elif not self.wb_wa:
-                    print("Main Memory: Writing " + str(block.tag) + "!")
+                # If doing write through we need to write diry at all layers
+                if not self.wb_wa:
+                    # If we are not the bottom layer, continue to propagate down
+                    if self.lower is not None:
+                        self.lower.access(mem_access)
+                    # Else if write-through and we have reached the bottom, write to memory
+                    else:
+                        print("Main Memory: Writing " + str(block.tag) + "!")
 
         # Update our sets
         self.sets[index] = found_set
@@ -145,15 +147,21 @@ class LRUCache(object):
     def miss_rate(self):
         return 1.0 - self.hit_rate()
 
+    def stat_string(self):
+        return " *** Cache: " + str(self.name) + " ***\n" \
+               " -- Latency: " + str(self.latency) + \
+               " -- Cache Size (KB): " + str(self.total_size_bytes / 1000) + \
+               " -- Block Size (B): " + str(self.block_size_bytes) + \
+               " -- Ways: " + str(self.blocks_per_set) + "\n"\
+               " -- Accesses: " + str(self.num_accesses) + \
+               " -- Hits: " + str(self.num_hits) + \
+               " -- Misses: " + str(self.num_accesses-self.num_hits) + \
+               " -- Hit Rate: " + str(int(self.hit_rate() * 100)) + "%" + \
+               " -- Miss Rate: " + str(int(self.miss_rate() * 100)) + "%\n"
+
     # Print out our cache table
     def __repr__(self):
-        summary_header = "-- Cache Name: " + str(self.name) + \
-                         " -- Latency: " + str(self.latency) + \
-                         " -- Cache Size (KB): " + str(self.total_size_bytes / 1000) + \
-                         " -- Block Size (B): " + str(self.block_size_bytes) + \
-                         " -- Ways: " + str(self.blocks_per_set) + \
-                         " -- Hit Rate: " + str(int(self.hit_rate() * 100)) + "%" + \
-                         " -- Miss Rate: " + str(int(self.miss_rate() * 100)) + "% --\n"
+        summary_header = self.stat_string()
         # Create header
         table_header = ["Index"]
         for i in range(self.blocks_per_set):

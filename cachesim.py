@@ -11,7 +11,6 @@ from memcomponents.access_sequence import AccessSequence
 from memcomponents.heirarchy import *
 
 
-
 class CacheSimulator(object):
     def __init__(self, sequence, heirarchy):
         self.sequence = sequence
@@ -24,10 +23,16 @@ class CacheSimulator(object):
         # Execute the memory trace
         for mem_access in self.sequence:
             self.heirarchy.access(mem_access)
+            if debug > 1:
+                print("\n\n<<<<<<<<<<< Instruction Access >>>>>>>>>>>>>>")
+                print("\n" + str(mem_access))
+                print("\n" + str(cache_heirarchy))
+
 
         if debug > 0:
-            print("\n"+str(self.sequence)+"\n")
-            print("\n"+str(self.heirarchy)+"\n")
+            print("\n\n************** Final Results ******************")
+            print("\n" + str(self.heirarchy) + "\n")
+            print("\n" + str(self.sequence) + "\n")
 
             # Write our execution time
             hours, rem = divmod(time.time() - startTime, 3600)
@@ -82,8 +87,12 @@ if __name__ == "__main__":
                         default='wb+wa', type=str,
                         help='Write/Allocate policy for all levels of cache. Options <wb+wa,wt+nwa>')
     parser.add_argument('-m', '--max-misses', dest='max_misses', action='store',
-                        default=10, type=int,
-                        help='Maximum number of misses for memory accesses to be acknowleged')
+                        default=0, type=int,
+                        help='Maximum number of misses for memory accesses to be acknowleged. A value of 0 is sequential access')
+    parser.add_argument('-d', '--debug-level', dest='debug_level', action='store',
+                        default=1, type=int,
+                        help='Verbosity of debug level. 0 = No Output, '
+                             '1 = Final Output Tables, 2 = Heirarchy Status at Every Instruction')
     parser.add_argument('-v', '--version', dest='version', action='store',
                         default='sequential', type=str,
                         help='Write/Allocate policy for all levels of cache. Options <sequential,access-under-misses>')
@@ -100,8 +109,8 @@ if __name__ == "__main__":
     # Create cache heirarchy
     cache_heirarchy = create_heirarchy(block_size=args.block_size,
                                        num_layers=args.cache_layers, sizes=args.cache_sizes, cycles=args.cache_cycles,
-                                       associativity=args.set_associativity, write_policy=args.write_policy)
+                                       associativity=args.set_associativity, write_policy=args.write_policy,max_misses=args.max_misses)
 
     # Create simulator
     cache_sim = CacheSimulator(memory_trace, cache_heirarchy)
-    cache_sim.run()
+    cache_sim.run(args.debug_level)
