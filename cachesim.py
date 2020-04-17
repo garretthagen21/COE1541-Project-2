@@ -88,7 +88,7 @@ if __name__ == "__main__":
                         help='Write/Allocate policy for all levels of cache. Options <wb+wa,wt+nwa>')
     parser.add_argument('-m', '--max-misses', dest='max_misses', action='store',
                         default=0, type=int,
-                        help='Maximum number of misses for memory accesses to be acknowleged. A value of 0 is sequential access')
+                        help='Maximum number of misses in cache for memory accesses to be acknowleged. A value of 0 is sequential access')
     parser.add_argument('-d', '--debug-level', dest='debug_level', action='store',
                         default=1, type=int,
                         help='Verbosity of debug level. 0 = No Output, '

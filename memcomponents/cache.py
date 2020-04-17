@@ -67,7 +67,10 @@ class LRUCache(object):
         return valid_blocks
 
 
-
+    def invalidate(self):
+        self.num_accesses = 0
+        self.num_hits = 0
+        self.sets = [LRUSet(self.blocks_per_set) for i in range(self.total_sets)]
 
     def access(self, mem_access):
 
@@ -98,9 +101,18 @@ class LRUCache(object):
                 # Get evicted block if any
                 evicted_block = found_set.__setitem__(tag, block)
 
-                # Write straight to memory if using write back
+                # Write straight to memory if using write back #TODO: do we need to account for latency here?
                 if self.wb_wa and evicted_block and evicted_block.dirty_bit:
-                    print(self.name + ": Writing " + str(evicted_block.tag) + " to memory!")
+                    # Add latency of writing straight to memory
+                    level = self
+                    while level.lower:
+                        level = level.lower
+                    mem_access.add_time( level.latency+ 100)
+                    #print(self.name + ": Writing " + str(evicted_block.data) + " to memory!")
+            # else write miss for write through - we still need to check other levels
+            else:
+                self.simulate_store_to(mem_access)
+
 
         # We hit our block
         else:
@@ -112,37 +124,40 @@ class LRUCache(object):
 
                 # If doing write through we need to write diry at all layers
                 if not self.wb_wa:
-                    # If we are not the bottom layer, continue to propagate down
-                    if self.lower is not None:
-                        self.lower.access(mem_access)
-                    # Else if write-through and we have reached the bottom, write to memory
-                    else:
-                        print("Main Memory: Writing " + str(block.tag) + "!")
+                    self.simulate_store_to(mem_access)
+
 
         # Update our sets
         self.sets[index] = found_set
 
-    def simulate_store_to(self,tag,mem_access):
-        # So if we are not the bottom layer, continue to propagate down
-        if self.lower is not None:
+    def simulate_store_to(self,mem_access):
+        # If we are not the bottom layer, continue to propagate down
+        if self.lower:
             self.lower.access(mem_access)
+        # if write-through and we have reached the bottom, write to memory
         else:
-            print("Main Memory: Writing " + str(mem_access.address) + "!")
+            mem_access.add_time(self.latency + 100) #TODO: do we need to account for latency here?
+            #print("Main Memory: Writing " + str(mem_access.address) + "!")
 
     def simulate_load_from(self, tag, mem_access):
         # We are the last level so simulate access, by adding 100 to our time
-        if self.lower is None:
-            if mem_access.mode == 'r':
-                mem_access.add_time(self.latency + 100)
-        else:
+        if self.lower:
             # Look in the memory source below us
             self.lower.access(mem_access)
+        else:
+            #if mem_access.mode == 'r':
+            mem_access.add_time(self.latency + 100)
 
         # Create new block to bring into memory, simulating from the
         return Block(tag, True, mem_access.mode == 'w', mem_access.address)
 
+
+
     def hit_rate(self):
-        return float(self.num_hits) / float(self.num_accesses)
+        try:
+            return float(self.num_hits) / float(self.num_accesses)
+        except ZeroDivisionError:
+            return 0.0
 
     def miss_rate(self):
         return 1.0 - self.hit_rate()

@@ -2,9 +2,7 @@ import argparse
 import random
 
 
-
-
-def convert_to_base(decimal_number, base,addr_size):
+def convert_to_base(decimal_number, base, addr_size):
     DIGITS = '0123456789abcdef'
     remainder_stack = []
 
@@ -20,16 +18,17 @@ def convert_to_base(decimal_number, base,addr_size):
     # Hack to make binary numbers addr_size bits
     if base == 2:
         while len(new_digits) < addr_size:
-            new_digits.insert(0,'0')
-
+            new_digits.insert(0, '0')
 
     return ''.join(new_digits)
+
+
 def coin_flip(prob=0.5):
     prob = min(1.0, max(0.0, prob))
     return random.randint(1, 100) <= prob * 100
 
 
-def create_trace_file(filename, addr_size, num_accesses, reuse_rate,number_base):
+def create_trace_file(filename, addr_size, num_accesses, reuse_rate, number_base,timing):
     wFile = open(filename, 'w+')
     maxAddr = 2 ** addr_size - 1
     time = 0
@@ -47,13 +46,19 @@ def create_trace_file(filename, addr_size, num_accesses, reuse_rate,number_base)
         mode = 'w' if coin_flip() else 'r'
 
         # Convert to appropriate number system
-        new_addr = convert_to_base(new_addr,number_base,addr_size)
+        new_addr = convert_to_base(new_addr, number_base, addr_size)
 
         # Write to the file
-        wFile.write(str(mode)+" "+str(new_addr)+" "+str(time)+"\n")
+        wFile.write(str(mode) + " " + str(new_addr) + " " + str(time) + "\n")
 
+        if timing == 0:
+            time_increment = 1
+        elif timing == 1:
+            time_increment = random.randint(1,5)
+        else:
+            time_increment = random.randint(0,4)
         # Increment our time
-        time += random.randint(0, 4)
+        time += time_increment
 
     wFile.close()
 
@@ -66,14 +71,16 @@ if __name__ == "__main__":
     parser.add_argument('-s', '--addr-size', dest='addr_size', default=32, type=int, help="Address size in bits")
     parser.add_argument('-a', '--num-accesses', dest='num_accesses', default=100, type=int,
                         help="How many accesses we want")
-    parser.add_argument('-b', '--base',dest='number_base',default=10,type=int,help="Number base (e.g. decimal = 10, binary = 2, hex = 16)")
+    parser.add_argument('-b', '--base', dest='number_base', default=10, type=int,
+                        help="Number base (e.g. decimal = 10, binary = 2, hex = 16)")
     parser.add_argument('-r', '--reuse-rate', dest='reuse_rate', default=0.3, type=float,
                         help="How often we want to reuse an existing address, This will increase hit rate")
-
+    parser.add_argument('-t', '--timing', dest='timing', default=0, type=int,
+                        help="Timing of each access(Sequential = 1, Random (No Collisions) = 2, Random (Collisions) = 3")
     # Parse the arguments
     args = parser.parse_args()
 
     # Verify they are correct
-    create_trace_file(args.file_name, args.addr_size, args.num_accesses, args.reuse_rate,args.number_base)
+    create_trace_file(args.file_name, args.addr_size, args.num_accesses, args.reuse_rate, args.number_base,args.timing)
 
     print("Done!")
